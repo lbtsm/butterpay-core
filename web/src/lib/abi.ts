@@ -1,0 +1,27 @@
+export const ERC20_ABI = [
+  { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
+  { name: "allowance", type: "function", stateMutability: "view", inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], outputs: [{ name: "", type: "uint256" }] },
+  { name: "approve", type: "function", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ name: "", type: "bool" }] },
+] as const;
+
+export const PAYMENT_ROUTER_ABI = [
+  {
+    name: "pay",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{
+      name: "params", type: "tuple", components: [
+        { name: "invoiceId", type: "bytes32" },
+        { name: "token", type: "address" },
+        { name: "amount", type: "uint256" },
+        { name: "merchant", type: "address" },
+        { name: "referrer", type: "address" },
+        { name: "serviceFeeBps", type: "uint16" },
+        { name: "referrerFeeBps", type: "uint16" },
+        { name: "deadline", type: "uint256" },
+      ],
+    }],
+    outputs: [],
+  },
+  { name: "isPaid", type: "function", stateMutability: "view", inputs: [{ name: "invoiceId", type: "bytes32" }], outputs: [{ name: "", type: "bool" }] },
+] as const;

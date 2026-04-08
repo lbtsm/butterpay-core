@@ -4,6 +4,7 @@ import { config } from "./config";
 import { apiKeyAuth } from "./middleware/auth";
 import { merchantRoutes } from "./routes/merchants";
 import { invoiceRoutes } from "./routes/invoices";
+import { keystoreRoutes } from "./routes/keystores";
 import { startPollingScheduler } from "./queues";
 
 declare module "fastify" {
@@ -27,6 +28,7 @@ async function main() {
   // Routes
   await app.register(merchantRoutes);
   await app.register(invoiceRoutes);
+  await app.register(keystoreRoutes);
 
   // Start background jobs
   startPollingScheduler();

@@ -19,9 +19,10 @@ export type Token = "USDT" | "USDC";
 
 export interface CreateInvoiceInput {
   merchantId: string;
-  amount: string; // decimal string, e.g. "10.00"
-  token: Token;
-  chain: Chain;
+  /** Amount in USD (e.g. "10.00"). Auto-matched to chain stablecoin. */
+  amountUsd: string;
+  /** Preferred chain (optional — user can change on payment page) */
+  chain?: Chain;
   description?: string;
   merchantOrderId?: string;
   metadata?: Record<string, unknown>;
@@ -33,12 +34,32 @@ export interface WebhookPayload {
   event: "payment.initiated" | "payment.confirmed" | "payment.failed";
   invoiceId: string;
   merchantOrderId?: string;
-  amount?: string;
+  amountUsd?: string;
+  token?: Token;
+  chain?: Chain;
+  tokenAmount?: string;
   serviceFee?: string;
   merchantReceived?: string;
   paymentMethod?: PaymentMethod;
-  chain?: Chain;
-  token?: Token;
   txHash?: string;
   timestamp: string;
+}
+
+export interface QuoteRequest {
+  inputToken: string;     // token address or symbol (e.g. "WETH")
+  outputToken: string;    // stablecoin (e.g. "USDT")
+  inputAmount: string;    // human-readable
+  chain: Chain;
+}
+
+export interface QuoteResponse {
+  inputToken: string;
+  outputToken: string;
+  inputAmount: string;
+  outputAmount: string;
+  minOutputAmount: string; // with slippage buffer
+  priceImpact: string;
+  dexRouter: string;
+  dexCalldata: string;
+  expiresAt: string;
 }

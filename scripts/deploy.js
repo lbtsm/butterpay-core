@@ -8,19 +8,19 @@ async function main() {
   const serviceFeeCollector = process.env.FEE_COLLECTOR || deployer.address;
   const serviceFeeBps = 80; // 0.8%
 
-  // --- PaymentReceiver ---
-  const PaymentReceiver = await ethers.getContractFactory("PaymentReceiver");
-  const paymentReceiver = await PaymentReceiver.deploy(serviceFeeCollector);
-  await paymentReceiver.waitForDeployment();
-  console.log("PaymentReceiver deployed to:", paymentReceiver.target);
+  // --- Phase 1: PaymentRouter ---
+  const PaymentRouter = await ethers.getContractFactory("PaymentRouter");
+  const router = await PaymentRouter.deploy(serviceFeeCollector);
+  await router.waitForDeployment();
+  console.log("PaymentRouter deployed to:", router.target);
 
-  // --- Splitter ---
+  // --- Phase 2: Splitter ---
   const Splitter = await ethers.getContractFactory("Splitter");
   const splitter = await Splitter.deploy();
   await splitter.waitForDeployment();
   console.log("Splitter deployed to:", splitter.target);
 
-  // --- SubscriptionManager ---
+  // --- Phase 2: SubscriptionManager ---
   const SubscriptionManager = await ethers.getContractFactory("SubscriptionManager");
   const subManager = await SubscriptionManager.deploy(serviceFeeCollector, serviceFeeBps);
   await subManager.waitForDeployment();

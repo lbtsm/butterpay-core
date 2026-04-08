@@ -4,8 +4,10 @@ import { config } from "./config";
 import { apiKeyAuth } from "./middleware/auth";
 import { merchantRoutes } from "./routes/merchants";
 import { invoiceRoutes } from "./routes/invoices";
+import { quoteRoutes } from "./routes/quotes";
 import { keystoreRoutes } from "./routes/keystores";
 import { startPollingScheduler } from "./queues";
+import { startDepegMonitor } from "./services/quote.service";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -25,13 +27,17 @@ async function main() {
   // Health check
   app.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
 
-  // Routes
+  // Phase 1 Routes
   await app.register(merchantRoutes);
   await app.register(invoiceRoutes);
+  await app.register(quoteRoutes);
+
+  // Phase 2 Routes (keystore for TG users)
   await app.register(keystoreRoutes);
 
   // Start background jobs
   startPollingScheduler();
+  startDepegMonitor();
 
   // Start server
   await app.listen({ port: config.port, host: config.host });

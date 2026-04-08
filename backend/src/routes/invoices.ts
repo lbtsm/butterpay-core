@@ -1,15 +1,14 @@
 import { FastifyInstance } from "fastify";
 import * as invoiceService from "../services/invoice.service";
 import { trackTransaction } from "../services/tx-tracker.service";
-import type { Chain, Token, InvoiceStatus } from "../types";
+import type { Chain, InvoiceStatus } from "../types";
 
 export async function invoiceRoutes(app: FastifyInstance) {
-  // Create invoice
+  // Create invoice (v2.1: USD-denominated, token/chain resolved at payment time)
   app.post<{
     Body: {
-      amount: string;
-      token: Token;
-      chain: Chain;
+      amountUsd: string;
+      chain?: Chain;
       description?: string;
       merchantOrderId?: string;
       metadata?: Record<string, unknown>;
@@ -19,16 +18,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
   }>("/v1/invoices", {
     preHandler: [app.apiKeyAuth],
     handler: async (request, reply) => {
-      const { amount, token, chain } = request.body;
+      const { amountUsd } = request.body;
 
-      if (!amount || !token || !chain) {
-        return reply
-          .status(400)
-          .send({ error: "amount, token, and chain are required" });
+      if (!amountUsd) {
+        return reply.status(400).send({ error: "amountUsd is required" });
       }
-
-      if (parseFloat(amount) <= 0) {
-        return reply.status(400).send({ error: "amount must be positive" });
+      if (parseFloat(amountUsd) <= 0) {
+        return reply.status(400).send({ error: "amountUsd must be positive" });
       }
 
       const invoice = await invoiceService.createInvoice({
@@ -40,12 +36,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
     },
   });
 
-  // Get invoice
+  // Get invoice (public — SDK needs to fetch without API key)
   app.get<{ Params: { id: string } }>("/v1/invoices/:id", {
-    preHandler: [app.apiKeyAuth],
     handler: async (request, reply) => {
       const invoice = await invoiceService.getInvoice(request.params.id);
-      if (!invoice || invoice.merchantId !== request.merchant!.id) {
+      if (!invoice) {
         return reply.status(404).send({ error: "not found" });
       }
       return invoice;
@@ -59,6 +54,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
       txHash: string;
       payerAddress: string;
       toAddress: string;
+      chain: Chain;
+      token: string;
     };
   }>("/v1/invoices/:id/tx", {
     handler: async (request, reply) => {
@@ -72,20 +69,28 @@ export async function invoiceRoutes(app: FastifyInstance) {
           .send({ error: `invoice is ${invoice.status}, expected created` });
       }
 
-      const { txHash, payerAddress, toAddress } = request.body;
-      if (!txHash || !payerAddress) {
+      const { txHash, payerAddress, toAddress, chain, token } = request.body;
+      if (!txHash || !payerAddress || !chain || !token) {
         return reply
           .status(400)
-          .send({ error: "txHash and payerAddress are required" });
+          .send({ error: "txHash, payerAddress, chain, and token are required" });
       }
+
+      // Update invoice with actual chain/token chosen by user
+      await invoiceService.updateInvoiceStatus(invoice.id, "initiated", {
+        txHash,
+        payerAddress,
+        chain,
+        token,
+      });
 
       const txId = await trackTransaction(
         invoice.id,
-        invoice.chain as Chain,
+        chain,
         txHash,
         payerAddress,
         toAddress,
-        invoice.token,
+        token,
         invoice.amount
       );
 
@@ -107,9 +112,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   }>("/v1/transactions", {
     preHandler: [app.apiKeyAuth],
     handler: async (request, reply) => {
-      const { status, chain, token, from, to, limit, offset } =
-        request.query;
-
+      const { status, chain, token, from, to, limit, offset } = request.query;
       const invoices = await invoiceService.listInvoices({
         merchantId: request.merchant!.id,
         status: status as InvoiceStatus,
@@ -120,7 +123,6 @@ export async function invoiceRoutes(app: FastifyInstance) {
         limit: limit ? parseInt(limit) : 50,
         offset: offset ? parseInt(offset) : 0,
       });
-
       return { data: invoices, count: invoices.length };
     },
   });
@@ -132,12 +134,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
     preHandler: [app.apiKeyAuth],
     handler: async (request, reply) => {
       const { from, to } = request.query;
-      const summary = await invoiceService.getTransactionsSummary(
+      return invoiceService.getTransactionsSummary(
         request.merchant!.id,
         from ? new Date(from) : undefined,
         to ? new Date(to) : undefined
       );
-      return summary;
     },
   });
 }

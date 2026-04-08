@@ -11,7 +11,6 @@ export async function createInvoice(input: CreateInvoiceInput) {
     Date.now() + DEFAULT_EXPIRY_MINUTES * 60 * 1000
   );
 
-  // Look up merchant to get service fee config
   const [merchant] = await db
     .select()
     .from(schema.merchants)
@@ -20,14 +19,14 @@ export async function createInvoice(input: CreateInvoiceInput) {
 
   if (!merchant) throw new Error("merchant not found");
 
-  const amount = input.amount;
+  // v2.1: Invoice is USD-denominated. Token/chain resolved at payment time.
+  const amountUsd = input.amountUsd;
   const serviceFeeBps = merchant.serviceFeeBps;
   const serviceFee = (
-    (parseFloat(amount) * serviceFeeBps) /
-    10000
+    (parseFloat(amountUsd) * serviceFeeBps) / 10000
   ).toFixed(18);
   const merchantReceived = (
-    parseFloat(amount) - parseFloat(serviceFee)
+    parseFloat(amountUsd) - parseFloat(serviceFee)
   ).toFixed(18);
 
   const [invoice] = await db
@@ -36,9 +35,9 @@ export async function createInvoice(input: CreateInvoiceInput) {
       id,
       merchantId: input.merchantId,
       merchantOrderId: input.merchantOrderId,
-      amount,
-      token: input.token,
-      chain: input.chain,
+      amount: amountUsd,
+      token: "USD", // USD-denominated; actual token set at payment time
+      chain: input.chain || "ethereum", // default, user picks on payment page
       description: input.description,
       metadata: input.metadata,
       redirectUrl: input.redirectUrl,
@@ -69,6 +68,8 @@ export async function updateInvoiceStatus(
     payerAddress: string;
     paymentMethod: string;
     confirmedAt: Date;
+    token: string;
+    chain: string;
   }>
 ) {
   const [invoice] = await db

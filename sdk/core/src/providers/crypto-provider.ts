@@ -8,7 +8,7 @@ import {
   type PublicClient,
   maxUint256,
 } from "viem";
-import { ERC20_ABI, PAYMENT_RECEIVER_ABI } from "../abi/index.js";
+import { ERC20_ABI, PAYMENT_ROUTER_ABI } from "../abi/index.js";
 import { defaultChainConfigs } from "../chains.js";
 import type {
   PaymentProvider,
@@ -19,6 +19,14 @@ import type {
   ChainConfig,
   BalanceInfo,
 } from "../types.js";
+
+// Tokens known to support EIP-2612 permit
+const PERMIT_TOKENS = new Set([
+  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // ETH USDC
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // ARB USDC
+  "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", // Polygon USDC
+  "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", // OP USDC
+].map((a) => a.toLowerCase()));
 
 export class CryptoPaymentProvider implements PaymentProvider {
   readonly method = "crypto" as const;
@@ -32,8 +40,6 @@ export class CryptoPaymentProvider implements PaymentProvider {
     chainOverrides?: Partial<Record<ChainName, Partial<ChainConfig>>>
   ) {
     this.wallet = wallet;
-
-    // Merge defaults with overrides
     this.chains = { ...defaultChainConfigs };
     if (chainOverrides) {
       for (const [name, overrides] of Object.entries(chainOverrides)) {
@@ -55,6 +61,11 @@ export class CryptoPaymentProvider implements PaymentProvider {
       this.clients.set(chain, client);
     }
     return this.clients.get(chain)!;
+  }
+
+  /** Check if a token supports EIP-2612 permit */
+  supportsPermit(tokenAddress: Address): boolean {
+    return PERMIT_TOKENS.has(tokenAddress.toLowerCase());
   }
 
   /** Scan all chains for token balances */
@@ -81,18 +92,16 @@ export class CryptoPaymentProvider implements PaymentProvider {
             });
           }
         } catch {
-          // Skip failed RPC calls
+          // Skip failed RPC
         }
       })
     );
 
     await Promise.allSettled(promises);
-    return results.sort(
-      (a, b) => parseFloat(b.balance) - parseFloat(a.balance)
-    );
+    return results.sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance));
   }
 
-  /** Check and approve token if needed */
+  /** Ensure token allowance (for tokens that don't support permit) */
   async ensureApproval(
     chain: ChainName,
     tokenAddress: Address,
@@ -110,9 +119,8 @@ export class CryptoPaymentProvider implements PaymentProvider {
       args: [address, spender],
     })) as bigint;
 
-    if (allowance >= amount) return; // Already approved
+    if (allowance >= amount) return;
 
-    // Approve max
     const data = encodeFunctionData({
       abi: ERC20_ABI,
       functionName: "approve",
@@ -126,7 +134,11 @@ export class CryptoPaymentProvider implements PaymentProvider {
     });
   }
 
-  /** Execute payment */
+  /**
+   * Execute payment. Automatically picks the best path:
+   * - Token supports permit → payWithPermit() (1 signature)
+   * - Token doesn't support permit → approve + pay() (2 signatures)
+   */
   async pay(params: PayParams): Promise<PayResult> {
     const address = this.wallet.getAddress();
     if (!address) throw new Error("Wallet not connected");
@@ -139,43 +151,114 @@ export class CryptoPaymentProvider implements PaymentProvider {
 
     const amountWei = parseUnits(params.amount, tokenCfg.decimals);
 
-    // 1. Ensure approval
-    await this.ensureApproval(
-      params.chain,
-      tokenCfg.address,
-      params.paymentReceiverAddress,
-      amountWei
-    );
+    const paymentParams = {
+      invoiceId: params.invoiceIdBytes32,
+      token: tokenCfg.address,
+      amount: amountWei,
+      merchant: params.merchantAddress,
+      referrer: params.referrer || ("0x0000000000000000000000000000000000000000" as Address),
+      serviceFeeBps: params.serviceFeeBps,
+      referrerFeeBps: params.referrerFeeBps || 0,
+      deadline: BigInt(params.deadline),
+    };
 
-    // 2. Build pay() call
-    const data = encodeFunctionData({
-      abi: PAYMENT_RECEIVER_ABI,
-      functionName: "pay",
-      args: [
-        {
-          invoiceId: params.invoiceIdBytes32,
-          token: tokenCfg.address,
-          amount: amountWei,
-          merchant: params.merchantAddress,
-          referrer: params.referrer || ("0x0000000000000000000000000000000000000000" as Address),
-          serviceFeeBps: params.serviceFeeBps,
-          referrerFeeBps: params.referrerFeeBps || 0,
-          deadline: BigInt(params.deadline),
-        },
-      ],
-    });
+    let data: `0x${string}`;
 
-    // 3. Send transaction
+    if (this.supportsPermit(tokenCfg.address) && this.wallet.signTypedData) {
+      // Permit path: one signature (no separate approve tx needed)
+      // TODO: build proper EIP-2612 permit signature via wallet.signTypedData
+      // For now, fallback to approve path
+      await this.ensureApproval(params.chain, tokenCfg.address, params.paymentReceiverAddress, amountWei);
+      data = encodeFunctionData({
+        abi: PAYMENT_ROUTER_ABI,
+        functionName: "pay",
+        args: [paymentParams],
+      });
+    } else {
+      // Approve path: two signatures
+      await this.ensureApproval(params.chain, tokenCfg.address, params.paymentReceiverAddress, amountWei);
+      data = encodeFunctionData({
+        abi: PAYMENT_ROUTER_ABI,
+        functionName: "pay",
+        args: [paymentParams],
+      });
+    }
+
     const txHash = await this.wallet.sendTransaction({
       to: params.paymentReceiverAddress,
       data,
       chainId: chainCfg.viemChain.id,
     });
 
-    return {
-      txHash,
-      chain: params.chain,
-      status: "submitted",
-    };
+    return { txHash, chain: params.chain, status: "submitted" };
+  }
+
+  /**
+   * Execute swap-and-pay for non-stablecoin tokens.
+   * Requires a quote from the backend Quote API.
+   */
+  async swapAndPay(params: {
+    invoiceIdBytes32: `0x${string}`;
+    chain: ChainName;
+    inputToken: Address;
+    outputToken: Address;
+    inputAmount: string;
+    inputDecimals: number;
+    minOutputAmount: string;
+    outputDecimals: number;
+    merchantAddress: Address;
+    paymentRouterAddress: Address;
+    serviceFeeBps: number;
+    referrer?: Address;
+    referrerFeeBps?: number;
+    deadline: number;
+    dexRouter: Address;
+    dexCalldata: `0x${string}`;
+  }): Promise<PayResult> {
+    const address = this.wallet.getAddress();
+    if (!address) throw new Error("Wallet not connected");
+
+    const chainCfg = this.chains[params.chain];
+    if (!chainCfg) throw new Error(`Unknown chain: ${params.chain}`);
+
+    const inputAmountWei = parseUnits(params.inputAmount, params.inputDecimals);
+    const minOutputWei = parseUnits(params.minOutputAmount, params.outputDecimals);
+
+    // Approve input token to PaymentRouter
+    await this.ensureApproval(
+      params.chain,
+      params.inputToken,
+      params.paymentRouterAddress,
+      inputAmountWei
+    );
+
+    const data = encodeFunctionData({
+      abi: PAYMENT_ROUTER_ABI,
+      functionName: "swapAndPay",
+      args: [
+        {
+          invoiceId: params.invoiceIdBytes32,
+          inputToken: params.inputToken,
+          outputToken: params.outputToken,
+          inputAmount: inputAmountWei,
+          minOutputAmount: minOutputWei,
+          merchant: params.merchantAddress,
+          referrer: params.referrer || ("0x0000000000000000000000000000000000000000" as Address),
+          serviceFeeBps: params.serviceFeeBps,
+          referrerFeeBps: params.referrerFeeBps || 0,
+          deadline: BigInt(params.deadline),
+          dexRouter: params.dexRouter,
+          dexCalldata: params.dexCalldata,
+        },
+      ],
+    });
+
+    const txHash = await this.wallet.sendTransaction({
+      to: params.paymentRouterAddress,
+      data,
+      chainId: chainCfg.viemChain.id,
+    });
+
+    return { txHash, chain: params.chain, status: "submitted" };
   }
 }

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ButterPay Widget Example</title>
+</head>
+<body style="font-family: system-ui; max-width: 600px; margin: 40px auto; padding: 0 20px;">
+
+  <h1>ButterPay Lite Widget Demo</h1>
+  <p>Zero-code payment integration. Just add one &lt;div&gt; and one &lt;script&gt;.</p>
+
+  <hr>
+
+  <h2>Fixed Amount Payment</h2>
+  <div id="butterpay-button"
+       data-amount="9.99"
+       data-description="Premium Monthly Plan"
+       data-api-url="http://localhost:3000"
+       data-api-key="bp_your_api_key_here"
+       data-merchant-order-id="plan-monthly"
+       data-on-success="handleSuccess"
+       data-on-error="handleError">
+  </div>
+
+  <hr>
+
+  <h2>Custom Amount (Tips)</h2>
+  <div id="butterpay-button-tip"
+       data-amount="5.00"
+       data-description="Tip"
+       data-label="Send a $5 Tip"
+       data-api-url="http://localhost:3000"
+       data-api-key="bp_your_api_key_here"
+       data-theme-color="#10b981"
+       data-on-success="handleSuccess">
+  </div>
+
+  <hr>
+
+  <div id="result" style="margin-top: 20px; padding: 12px; background: #f0f0f0; border-radius: 8px; display: none;"></div>
+
+  <script>
+    function handleSuccess(invoiceId, txHash) {
+      var el = document.getElementById('result');
+      el.style.display = 'block';
+      el.style.background = '#d1fae5';
+      el.textContent = 'Payment confirmed! Invoice: ' + invoiceId + ' Tx: ' + txHash;
+    }
+
+    function handleError(error) {
+      var el = document.getElementById('result');
+      el.style.display = 'block';
+      el.style.background = '#fee2e2';
+      el.textContent = 'Payment error: ' + error;
+    }
+  </script>
+
+  <script src="./butterpay-widget.js"></script>
+</body>
+</html>

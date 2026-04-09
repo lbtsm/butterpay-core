@@ -14,6 +14,12 @@ async function main() {
   await router.waitForDeployment();
   console.log("PaymentRouter deployed to:", router.target);
 
+  // --- Phase 2: ButterPayDelegate (EIP-7702) ---
+  const ButterPayDelegate = await ethers.getContractFactory("ButterPayDelegate");
+  const delegate = await ButterPayDelegate.deploy();
+  await delegate.waitForDeployment();
+  console.log("ButterPayDelegate deployed to:", delegate.target);
+
   // --- Phase 2: Splitter ---
   const Splitter = await ethers.getContractFactory("Splitter");
   const splitter = await Splitter.deploy();

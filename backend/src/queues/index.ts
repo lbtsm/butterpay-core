@@ -140,4 +140,40 @@ export async function startPollingScheduler() {
       console.error("[webhook-retry-scheduler] Error:", err);
     }
   }, 30_000);
+
+  // ========================= Subscription Scheduler =========================
+  // Check for due subscriptions every 60 seconds
+  setInterval(async () => {
+    try {
+      const { getDueSubscriptions, markCharged, markFailed } = await import(
+        "../services/subscription.service.js"
+      );
+      const { chargeSubscription } = await import("../services/relayer.service.js");
+
+      const dueSubs = await getDueSubscriptions();
+
+      for (const sub of dueSubs) {
+        if (!sub.onChainId) continue;
+
+        // TODO: subscription manager address per chain from config
+        const subManagerAddr = "0x0000000000000000000000000000000000000000" as `0x${string}`;
+
+        const txHash = await chargeSubscription(
+          sub.chain as any,
+          subManagerAddr,
+          sub.onChainId
+        );
+
+        if (txHash) {
+          await markCharged(sub.id, sub.interval);
+          console.log(`[subscription] Charged sub ${sub.id}, tx: ${txHash}`);
+        } else {
+          await markFailed(sub.id);
+          console.warn(`[subscription] Failed to charge sub ${sub.id}`);
+        }
+      }
+    } catch (err) {
+      console.error("[subscription-scheduler] Error:", err);
+    }
+  }, 60_000);
 }

@@ -6,6 +6,7 @@ import { merchantRoutes } from "./routes/merchants";
 import { invoiceRoutes } from "./routes/invoices";
 import { quoteRoutes } from "./routes/quotes";
 import { keystoreRoutes } from "./routes/keystores";
+import { subscriptionRoutes } from "./routes/subscriptions";
 import { startPollingScheduler } from "./queues";
 import { startDepegMonitor } from "./services/quote.service";
 
@@ -32,8 +33,9 @@ async function main() {
   await app.register(invoiceRoutes);
   await app.register(quoteRoutes);
 
-  // Phase 2 Routes (keystore for TG users)
+  // Phase 2 Routes
   await app.register(keystoreRoutes);
+  await app.register(subscriptionRoutes);
 
   // Start background jobs
   startPollingScheduler();

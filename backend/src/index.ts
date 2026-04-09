@@ -7,6 +7,8 @@ import { invoiceRoutes } from "./routes/invoices";
 import { quoteRoutes } from "./routes/quotes";
 import { keystoreRoutes } from "./routes/keystores";
 import { subscriptionRoutes } from "./routes/subscriptions";
+import { fiatRoutes } from "./routes/fiat";
+import { referrerRoutes } from "./routes/referrers";
 import { startPollingScheduler } from "./queues";
 import { startDepegMonitor } from "./services/quote.service";
 
@@ -36,6 +38,10 @@ async function main() {
   // Phase 2 Routes
   await app.register(keystoreRoutes);
   await app.register(subscriptionRoutes);
+
+  // Phase 3 Routes
+  await app.register(fiatRoutes);
+  await app.register(referrerRoutes);
 
   // Start background jobs
   startPollingScheduler();
